@@ -1,2 +1,2 @@
 # monitoring_tools
-Grafana, Node_Exporter, Promethues, Alertmanager
+Shell script for the installation of Grafana, Node_Exporter, Prometheus, Alertmanager
