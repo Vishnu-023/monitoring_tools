@@ -1,0 +1,73 @@
+#!/bin/bash
+
+# Check if the script is being run as root
+
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root."
+   exit 1
+fi
+
+# Let's Create a system user for Node Exporter
+
+sudo useradd \
+    --system \
+    --no-create-home \
+    --shell /bin/false node_exporter
+
+# Download Node Exporter binary
+
+ wget https://github.com/prometheus/node_exporter/releases/download/v1.6.1/node_exporter-1.6.1.linux-amd64.tar.gz
+
+# Extract Node Exporter from archive
+
+tar -xvf node_exporter-1.6.1.linux-amd64.tar.gz
+
+# Move binary to /usr/lacal/bin
+
+sudo mv \
+  node_exporter-1.6.1.linux-amd64/node_exporter \
+  /usr/local/bin/
+
+# Clean up, delete node_exporter aarchive & folder
+
+rm -rf node_exporter*
+
+# Create systemd unit file, which is a system and service manager for Linux operating systems.
+cat <<EOF > /etc/systemd/system/node_exporter.service
+
+[Unit]
+Description=Node Exporter
+Wants=network-online.target
+After=network-online.target
+
+StartLimitIntervalSec=500
+StartLimitBurst=5
+
+[Service]
+User=node_exporter
+Group=node_exporter
+Type=simple
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/local/bin/node_exporter \
+    --collector.logind
+
+[Install]
+WantedBy=multi-user.target
+
+EOF
+
+# To automatically start Node Exporter after reboot, enable the service
+
+sudo systemctl enable node_exporter
+
+# Start Node Exporter
+
+sudo systemctl start node_exporter
+
+# Check the status of Node Exporter
+
+sudo systemctl status node_exporter
+
+
+
