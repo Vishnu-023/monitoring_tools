@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# Check if the script is being run as root
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run this script as root"
+  exit 1
+fi
+
+# Install required dependencies using YUM
+yum update
+yum install -y wget
+
+# Download and install Prometheus
+PROMETHEUS_VERSION="2.32.1"  # Replace with the desired version
+PROMETHEUS_DOWNLOAD_URL="https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+
+# Create a temporary directory for downloading and extracting Prometheus
+TMP_DIR=$(mktemp -d)
+cd "$TMP_DIR" || exit
+
+# Download Prometheus
+wget "$PROMETHEUS_DOWNLOAD_URL"
+
+# Extract Prometheus archive
+tar xvfz "prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+
+# Move Prometheus binaries to /usr/local/bin/
+mv "prometheus-${PROMETHEUS_VERSION}.linux-amd64/prometheus" /usr/local/bin/
+mv "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool" /usr/local/bin/
+
+# Clean up temporary files
+rm -rf "$TMP_DIR"
+
+# Create Prometheus user
+useradd -rs /bin/false prometheus
+
+# Create necessary directories and set ownership
+mkdir -p /etc/prometheus /var/lib/prometheus
+chown prometheus:prometheus /etc/prometheus /var/lib/prometheus
+
+# Create Prometheus configuration
+cat <<EOF > /etc/prometheus/prometheus.yml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+EOF
+
+# Create Prometheus service
+cat <<EOF > /etc/systemd/system/prometheus.service
+[Unit]
+Description=Prometheus
+After=network.target
+
+[Service]
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/usr/local/bin/prometheus \
+  --config.file /etc/prometheus/prometheus.yml \
+  --storage.tsdb.path /var/lib/prometheus
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd and start Prometheus
+systemctl daemon-reload
+systemctl start prometheus
+systemctl enable prometheus
+
+echo "Prometheus installed and started successfully."
