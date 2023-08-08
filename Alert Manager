@@ -1,37 +1,109 @@
 #!/bin/bash
-#shell script to run to install alt managaer
-#To send alerts, we're going to use Alertmanager. It takes care of deduplicating, grouping, and routing them to the correct receiver integration such as email, PagerDuty, or in our case Slack. You can set up multiple Alertmanagers to achieve high availability. For this demo, I will install a single one.
-#reate a system user for Alertmanager
+# To send alerts, we're going to use Alertmanager. It takes care of deduplicating, grouping, and routing them to the correct receiver integration such as email, PagerDuty, or in our case Slack.
+# let's create a system user for Alertmanager.
+
 sudo useradd \
     --system \
     --no-create-home \
     --shell /bin/false alertmanager
-#download Alertmanager
+
+# download Alertmanager from the same downloads page
+
 wget https://github.com/prometheus/alertmanager/releases/download/v0.23.0/alertmanager-0.23.0.linux-amd64.tar.gz
-#Extract Alertmanager
+
+# Extract Alertmanager binary.
+
 tar -xvf alertmanager-0.23.0.linux-amd64.tar.gz
-#Alertmanager, we need storage. It is mandatory (it defaults to "data/") and is used to store Alertmanager's notification states and silences. Without this state (or if you wipe it), Alertmanager would not know across restarts what silences were created or what notifications were already sent
+
+# For Alertmanager, we need storage
+
 sudo mkdir -p /alertmanager-data /etc/alertmanager
-# move Alermanager's binary to the local bin and copy sample config
+
+# let's move Alermanager's binary to the local bin and copy sample config.
+
 sudo mv alertmanager-0.23.0.linux-amd64/alertmanager /usr/local/bin/
 sudo mv alertmanager-0.23.0.linux-amd64/alertmanager.yml /etc/alertmanager/
-#Remove downloaded archive
+
+# Remove downloaded archive and a folder.
+
 rm -rf alertmanager*
-#we can run Alertmanager.
+
+# Check if we can run Alertmanager.
+
 alertmanager --version
-if [ $? = "0" ];
-then 
-echo 'build succesfull'
-else
-echo 'build unsuccesfull'
-fi 
-echo '**************'
-echo '**check status in version***'
-echo 'run bellow commands'
-echo sudo vim /etc/systemd/system/alertmanager.service
-echo '**************'
-echo sudo systemctl start alertmangaer
-echo sudo systemctl enable alertmanager
-echo sudo systemctl start alertmanager
-echo sudo systemctl status alertmanager
-echo 'urun above commands'
+
+# the systemd service definition.
+
+cat <<EOF > /etc/systemd/system/alertmanager.service
+
+[Unit]
+Description=Alertmanager
+Wants=network-online.target
+After=network-online.target
+
+StartLimitIntervalSec=500
+StartLimitBurst=5
+
+[Service]
+User=alertmanager
+Group=alertmanager
+Type=simple
+Restart=on-failure
+RestartSec=5s
+ExecStart=/usr/local/bin/alertmanager \
+  --storage.path=/alertmanager-data \
+  --config.file=/etc/alertmanager/alertmanager.yml
+
+[Install]
+WantedBy=multi-user.target
+
+EOF
+
+# Enable alertmanager.
+
+sudo systemctl enable alertmanager
+
+# Start Alertmanager.
+
+sudo systemctl start alertmanager
+
+# Check the Status
+
+sudo systemctl status alertmanager
+
+
+# It's time to create a simple alert. In almost all Prometheus setups, you have an alert that is always active. It is used to validate the monitoring system itself. For example, it can be integrated with the deadmanssnitch service. If something goes wrong with the Prometheus or Alertmanager and, you will get an emergency notification that your monitoring system is down. It's a very useful service, especially in production environments.
+
+cat <<EOF > /etc/prometheus/dead-mans-snitch-rule.yml
+
+---
+groups:
+- name: dead-mans-snitch
+  rules:
+  - alert: DeadMansSnitch
+    annotations:
+      message: This alert is integrated with DeadMansSnitch.
+    expr: vector(1)
+
+EOF
+
+# update the Prometheus config to specify the location of Alertmanager and specify the path to the new rule.
+
+cat <<EOF > /etc/prometheus/prometheus.yml
+
+...
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - localhost:9093
+rule_files:
+  - dead-mans-snitch-rule.yml
+
+EOF
+
+# check Prometheus config before restarting
+
+promtool check config /etc/prometheus/prometheus.yml
+sudo systemctl restart prometheus
+sudo systemctl status prometheus
